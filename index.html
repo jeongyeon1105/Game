@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>레크레이션 퀴즈</title>
+<style>
+  body{font-family:system-ui,sans-serif;max-width:640px;margin:0 auto;padding:16px;background:#fafafa}
+  button{font-size:1rem;padding:10px 14px;border:0;border-radius:8px;background:#4a6cf7;color:#fff;cursor:pointer}
+  button.sub{background:#999} button.on{background:#222}
+  input,textarea,select{width:100%;box-sizing:border-box;font-size:1rem;padding:8px;margin:4px 0}
+  .tabs{display:flex;gap:8px;margin-bottom:12px}
+  .card{background:#fff;border:1px solid #ddd;border-radius:10px;padding:14px;margin:8px 0;font-size:1.1rem;display:flex;justify-content:space-between;align-items:center}
+  .player{background:#fff;border:2px solid #4a6cf7;border-radius:12px;padding:16px;margin:12px 0}
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .answer{font-size:1.4rem;font-weight:bold;margin:8px 0}
+  #now{white-space:pre-wrap;color:#555;margin-top:8px}
+</style>
+</head>
+<body>
+<h1>🎤 레크레이션 퀴즈</h1>
+<div class="tabs">
+  <button id="tab-lyrics" onclick="setTab('lyrics')">가사 맞추기</button>
+  <button id="tab-dance" onclick="setTab('dance')">춤 맞추기</button>
+</div>
+
+<div id="player" class="player" hidden>
+  <div id="answer" class="answer"></div>
+  <div class="row">
+    <button id="reveal" class="sub" onclick="toggleAnswer()">정답 보기</button>
+    <button id="play" onclick="playPause()">▶ 읽어주기</button>
+    <button class="sub" onclick="restart()">⏮ 처음부터</button>
+    <button class="sub" onclick="closePlayer()">닫기</button>
+  </div>
+  <div id="now"></div>
+</div>
+
+<div id="list"></div>
+
+<details>
+  <summary>➕ 문제 추가</summary>
+  <input id="f-title" placeholder="노래 제목">
+  <input id="f-singer" placeholder="가수">
+  <textarea id="f-lyrics" rows="6" placeholder="읽어줄 가사 (줄바꿈으로 구분, 춤 맞추기는 비워도 됨)"></textarea>
+  <button onclick="add()">저장</button>
+</details>
+
+<script>
+const KEY = 'recreation-quiz';
+let songs = JSON.parse(localStorage.getItem(KEY) || '[]');
+let tab = 'lyrics', cur = null;
+let lines = [], idx = 0, state = 'idle', run = 0; // state: idle | playing | paused
+
+const $ = id => document.getElementById(id);
+const save = () => localStorage.setItem(KEY, JSON.stringify(songs));
+
+function setTab(t){
+  tab = t; closePlayer();
+  $('tab-lyrics').className = t === 'lyrics' ? 'on' : '';
+  $('tab-dance').className = t === 'dance' ? 'on' : '';
+  render();
+}
+
+function render(){
+  $('list').innerHTML = songs.map((s, i) => ({s, i})).filter(x => x.s.type === tab)
+    .map(({s, i}) => `<div class="card"><span onclick="open_(${i})" style="flex:1;cursor:pointer">🎵 문제 ${i + 1}</span>
+      <button class="sub" onclick="del(${i})">삭제</button></div>`).join('') || '<p>등록된 문제가 없어요. 아래에서 추가하세요.</p>';
+}
+
+function add(){
+  const title = $('f-title').value.trim(), singer = $('f-singer').value.trim(), lyrics = $('f-lyrics').value.trim();
+  if (!title) return alert('노래 제목을 입력하세요');
+  if (tab === 'lyrics' && !lyrics) return alert('가사를 입력하세요');
+  songs.push({type: tab, title, singer, lyrics}); save();
+  ['f-title', 'f-singer', 'f-lyrics'].forEach(id => $(id).value = '');
+  render();
+}
+
+function del(i){
+  if (!confirm('삭제할까요?')) return;
+  closePlayer(); songs.splice(i, 1); save(); render();
+}
+
+function open_(i){
+  stop(); cur = songs[i];
+  lines = cur.lyrics.split('\n').map(l => l.trim()).filter(Boolean); idx = 0;
+  $('player').hidden = false;
+  $('answer').textContent = '🤔 정답은?'; $('reveal').textContent = '정답 보기';
+  $('now').textContent = '';
+  $('play').hidden = $('now').hidden = cur.type === 'dance'; // 춤 문제는 읽어줄 가사가 없음
+  $('play').textContent = '▶ 읽어주기';
+}
+
+function toggleAnswer(){
+  const shown = $('reveal').textContent === '정답 숨기기';
+  $('answer').textContent = shown ? '🤔 정답은?' : `${cur.title}${cur.singer ? ' - ' + cur.singer : ''}`;
+  $('reveal').textContent = shown ? '정답 보기' : '정답 숨기기';
+}
+
+function speakNext(id){
+  if (id !== run) return;
+  if (idx >= lines.length){ state = 'idle'; idx = 0; $('play').textContent = '▶ 다시 읽어주기'; return; }
+  const u = new SpeechSynthesisUtterance(lines[idx]);
+  u.lang = 'ko-KR'; u.rate = 0.9;
+  $('now').textContent = lines[idx];
+  u.onend = () => { if (id === run){ idx++; speakNext(id); } };
+  speechSynthesis.speak(u);
+}
+
+// pause()/resume() 는 모바일 브라우저에서 불안정해서, 취소 후 멈춘 줄부터 다시 읽는 방식으로 구현
+function playPause(){
+  if (state === 'playing'){
+    run++; speechSynthesis.cancel(); state = 'paused';
+    $('play').textContent = '▶ 이어서 읽기';
+  } else {
+    state = 'playing'; $('play').textContent = '⏸ 일시정지';
+    speakNext(++run);
+  }
+}
+
+function stop(){ run++; speechSynthesis.cancel(); state = 'idle'; idx = 0; }
+function restart(){ stop(); playPause(); }
+function closePlayer(){ stop(); $('player').hidden = true; }
+
+setTab('lyrics');
+</script>
+</body>
+</html>
