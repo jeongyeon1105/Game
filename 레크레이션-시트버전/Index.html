@@ -126,14 +126,20 @@ function speakNext(id){
   if (id !== run) return;
   if (idx >= lines.length){ state = 'idle'; idx = 0; mark(); $('play').textContent = '▶ 다시 읽어주기'; return; }
   mark();
-  const u = new SpeechSynthesisUtterance(lines[idx]);
-  u.lang = 'ko-KR'; u.rate = 0.9;
-  u.voice = speechSynthesis.getVoices().find(v => v.lang.replace('_', '-').startsWith('ko')) || null;
+  // 영어 덩어리는 영어 음성으로, 나머지는 한국어 음성으로 따로 읽는다
+  const parts = lines[idx].split(/([A-Za-z][A-Za-z0-9'’-]*(?:[ ,.!?]+[A-Za-z][A-Za-z0-9'’-]*)*)/).filter(p => p.trim());
+  const voices = speechSynthesis.getVoices();
   const warn = setTimeout(() => { if (id === run) say('소리가 안 나면 기기 음량·무음 모드, 한국어 음성 설치를 확인하세요.'); }, 3000);
-  u.onstart = () => { clearTimeout(warn); say(''); };
-  u.onerror = e => { clearTimeout(warn); if (id === run) say('음성 오류: ' + e.error); };
-  u.onend = () => { clearTimeout(warn); if (id === run){ idx++; speakNext(id); } };
-  speechSynthesis.speak(u);
+  parts.forEach((p, n) => {
+    const en = /^[A-Za-z]/.test(p.trim()), lang = en ? 'en' : 'ko';
+    const u = new SpeechSynthesisUtterance(p);
+    u.lang = en ? 'en-US' : 'ko-KR'; u.rate = 0.9;
+    u.voice = voices.find(v => v.lang.replace('_', '-').startsWith(lang)) || null;
+    u.onstart = () => { clearTimeout(warn); say(''); };
+    u.onerror = e => { clearTimeout(warn); if (id === run) say('음성 오류: ' + e.error); };
+    if (n === parts.length - 1) u.onend = () => { clearTimeout(warn); if (id === run){ idx++; speakNext(id); } };
+    speechSynthesis.speak(u);
+  });
 }
 
 // pause()/resume() 는 모바일 브라우저에서 불안정해서, 취소 후 멈춘 줄부터 다시 읽는 방식으로 구현
